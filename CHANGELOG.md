@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-26
+
+### Fixed
+
+- Include complete PKGBUILD, .SRCINFO, and packaging license files in AUR publication artifacts.
+
 ## [0.1.0] - 2026-10-26
 
 ### Added
@@ -31,5 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Diagnostics attempt close-frame delivery when their context is canceled or reaches its deadline.
 - Acceptance subprocess ownership, event validation, fixture teardown, and reconnect sequence assertions.
 
-[unreleased]: https://github.com/victorzhuk/mon-1stplayer-linux/compare/v0.1.0...HEAD
+[unreleased]: https://github.com/victorzhuk/mon-1stplayer-linux/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/victorzhuk/mon-1stplayer-linux/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/victorzhuk/mon-1stplayer-linux/releases/tag/v0.1.0

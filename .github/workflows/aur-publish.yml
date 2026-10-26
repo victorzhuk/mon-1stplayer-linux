@@ -62,7 +62,7 @@ jobs:
               echo "error: expected_sha256 must be 64 lowercase hexadecimal characters" >&2
               exit 1
           fi
-          work="$RUNNER_TEMP/$PKGNAME"
+          work="$GITHUB_WORKSPACE/aur-output/$PKGNAME"
           mkdir -p "$work"
 
           if [ "$KIND" = "source" ]; then
@@ -101,10 +101,7 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: aur-${{ matrix.pkgname }}
-          path: |
-            ${{ runner.temp }}/${{ matrix.pkgname }}/PKGBUILD
-            ${{ runner.temp }}/${{ matrix.pkgname }}/.SRCINFO
-            ${{ runner.temp }}/${{ matrix.pkgname }}/LICENSE
+          path: aur-output/${{ matrix.pkgname }}
           include-hidden-files: true
           if-no-files-found: error
 
