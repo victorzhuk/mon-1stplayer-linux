@@ -129,19 +129,19 @@ Log out and log in again before running the diagnostic. Do not run it as root to
 
 ### Arch Linux packaging
 
-Three x86_64 package recipes are maintained in this repository:
+Three x86_64 packages are published on AUR, with recipes maintained in this repository:
 
 | Package | Source | Recipe |
 | --- | --- | --- |
-| `mon-1stplayer` | Stable source archive | [`pkg/archlinux/stable/PKGBUILD.in`](pkg/archlinux/stable/PKGBUILD.in) |
-| `mon-1stplayer-bin` | Stable release binary | [`pkg/archlinux/bin/PKGBUILD.in`](pkg/archlinux/bin/PKGBUILD.in) |
-| `mon-1stplayer-git` | GitHub VCS checkout | [`pkg/archlinux/PKGBUILD`](pkg/archlinux/PKGBUILD) |
+| [`mon-1stplayer`](https://aur.archlinux.org/packages/mon-1stplayer) | Stable source archive | [`pkg/archlinux/stable/PKGBUILD.in`](pkg/archlinux/stable/PKGBUILD.in) |
+| [`mon-1stplayer-bin`](https://aur.archlinux.org/packages/mon-1stplayer-bin) | Stable release binary | [`pkg/archlinux/bin/PKGBUILD.in`](pkg/archlinux/bin/PKGBUILD.in) |
+| [`mon-1stplayer-git`](https://aur.archlinux.org/packages/mon-1stplayer-git) | GitHub VCS checkout | [`pkg/archlinux/PKGBUILD`](pkg/archlinux/PKGBUILD) |
 
 Tags matching `vX.Y.Z` trigger GitHub release artifacts and automatic publication of the stable source and binary packages to AUR. CI renders the stable templates with the tag version and downloaded archive hashes, then generates `.SRCINFO`. The templates are not directly publishable. No manual `pkgver` edit is needed. The VCS package remains separate and is not automatically updated for version-only upstream changes.
 
 The package installs the daemon, systemd unit, sysusers file, udev rule, `/etc/mon-1stplayer.conf`, and Apache-2.0 license. The config is backup-protected with `backup=('etc/mon-1stplayer.conf')`. Installation does not start or enable the service.
 
-Public AUR availability depends on publication of the upstream source, release assets, and AUR packages. Recipe files alone do not establish public availability. See the [release runbook](docs/RELEASE.md) for prerequisites and release steps.
+[Release v0.1.2](https://github.com/victorzhuk/mon-1stplayer-linux/releases/tag/v0.1.2) provides `mon-1stplayer-x86_64-linux.tar.gz` and its `.sha256` checksum. The stable source and binary AUR packages are published at `0.1.2-1`, and the VCS package at `r1.2d82ba4-1`. See the [release runbook](docs/RELEASE.md) for prerequisites and release steps.
 
 ## Physical validation: writes to hardware
 

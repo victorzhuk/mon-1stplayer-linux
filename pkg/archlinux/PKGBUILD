@@ -1,7 +1,6 @@
 # Maintainer: Victor Zhuk <zhuk at pm dot me>
 pkgname=mon-1stplayer-git
-# Bootstrap value: upstream carries no revision yet. pkgver() below derives
-# r<commit-count>.<short hash> from the VCS source once one exists.
+# pkgver() derives the VCS version from the source repository.
 pkgver=0
 pkgrel=1
 pkgdesc='Linux hardware monitor daemon for the 1STPLAYER USB display'
