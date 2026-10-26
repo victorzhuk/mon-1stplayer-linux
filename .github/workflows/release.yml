@@ -1,0 +1,111 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    needs: checks
+    outputs:
+      sha256: ${{ steps.archive.outputs.sha256 }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
+        with:
+          go-version-file: go.mod
+      - name: Stage release tarball
+        run: bash scripts/stage-release.sh "${GITHUB_REF_NAME#v}"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: tarball
+          path: |
+            dist/mon-1stplayer-x86_64-linux.tar.gz
+            dist/mon-1stplayer-x86_64-linux.tar.gz.sha256
+          if-no-files-found: error
+      - name: Expose archive hash
+        id: archive
+        run: echo "sha256=$(awk '{print $1}' dist/mon-1stplayer-x86_64-linux.tar.gz.sha256)" >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: tarball
+          path: release-assets
+      - name: Verify tarball checksum
+        run: cd release-assets && sha256sum -c mon-1stplayer-x86_64-linux.tar.gz.sha256
+      - name: Preflight existing release assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          EXPECTED_SHA256: ${{ needs.build.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$GITHUB_REF_NAME" --json assets --jq '.assets[].name' > existing-assets.txt; then
+            if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+              echo "error: failed to list assets for $GITHUB_REF_NAME" >&2
+              exit 1
+            fi
+            : > existing-assets.txt
+          fi
+          mkdir -p existing
+          tarball=mon-1stplayer-x86_64-linux.tar.gz
+          sidecar=mon-1stplayer-x86_64-linux.tar.gz.sha256
+          if grep -Fxq "$tarball" existing-assets.txt; then
+            gh release download "$GITHUB_REF_NAME" --pattern "$tarball" --dir existing --clobber
+            actual=$(sha256sum "existing/$tarball" | awk '{print $1}')
+            if [ "$actual" != "$EXPECTED_SHA256" ]; then
+              echo "error: existing asset $tarball differs from this build ($actual != $EXPECTED_SHA256); push a new tag instead of overwriting" >&2
+              exit 1
+            fi
+          else
+            echo "$tarball not present in release yet; release action will upload it"
+          fi
+          if grep -Fxq "$sidecar" existing-assets.txt; then
+            gh release download "$GITHUB_REF_NAME" --pattern "$sidecar" --dir existing --clobber
+            actual=$(awk '{print $1}' "existing/$sidecar")
+            if [ "$actual" != "$EXPECTED_SHA256" ]; then
+              echo "error: existing asset $sidecar differs from this build ($actual != $EXPECTED_SHA256); push a new tag instead of overwriting" >&2
+              exit 1
+            fi
+          else
+            echo "$sidecar not present in release yet; release action will upload it"
+          fi
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          overwrite_files: false
+          files: |
+            release-assets/mon-1stplayer-x86_64-linux.tar.gz
+            release-assets/mon-1stplayer-x86_64-linux.tar.gz.sha256
+
+  aur:
+    needs: [release, build]
+    uses: ./.github/workflows/aur-publish.yml
+    with:
+      release_tag: ${{ github.ref_name }}
+      expected_sha256: ${{ needs.build.outputs.sha256 }}
+    secrets:
+      AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+      AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+      AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}

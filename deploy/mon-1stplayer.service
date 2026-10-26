@@ -1,0 +1,24 @@
+[Unit]
+Description=mon-1stplayer hardware monitor daemon
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=mon-1stplayer
+Group=mon-1stplayer
+ExecStart=/usr/bin/mon-1stplayer
+EnvironmentFile=/etc/mon-1stplayer.conf
+Restart=on-failure
+RestartSec=5
+RestartPreventExitStatus=2
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+PrivateDevices=no
+TimeoutStopSec=15
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,208 @@
+name: AUR Publish
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: Tag of the release being published (for example v1.2.3)
+        required: true
+        type: string
+      expected_sha256:
+        description: Expected sha256 of the release binary tarball (64 lowercase hex characters)
+        required: true
+        type: string
+    secrets:
+      AUR_USERNAME:
+        required: true
+      AUR_EMAIL:
+        required: true
+      AUR_SSH_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkgname: mon-1stplayer
+            template: pkg/archlinux/stable/PKGBUILD.in
+            kind: source
+          - pkgname: mon-1stplayer-bin
+            template: pkg/archlinux/bin/PKGBUILD.in
+            kind: binary
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    container:
+      image: archlinux:base
+    steps:
+      - name: Install build prerequisites
+        run: pacman -Syu --noconfirm base-devel git curl ca-certificates
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Render AUR package
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
+          EXPECTED_SHA256: ${{ inputs.expected_sha256 }}
+          PKGNAME: ${{ matrix.pkgname }}
+          TEMPLATE: ${{ matrix.template }}
+          KIND: ${{ matrix.kind }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          if ! [[ "$version" =~ ^([0-9]|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || [ "$RELEASE_TAG" != "v$version" ]; then
+              echo "error: release tag must be strict vX.Y.Z without leading zeros: $RELEASE_TAG" >&2
+              exit 1
+          fi
+          if ! [[ "$EXPECTED_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+              echo "error: expected_sha256 must be 64 lowercase hexadecimal characters" >&2
+              exit 1
+          fi
+          work="$RUNNER_TEMP/$PKGNAME"
+          mkdir -p "$work"
+
+          if [ "$KIND" = "source" ]; then
+              archive="$work/mon-1stplayer-$version.tar.gz"
+              curl -fsSL --retry 3 \
+                  "https://github.com/victorzhuk/mon-1stplayer-linux/archive/refs/tags/$RELEASE_TAG.tar.gz" \
+                  -o "$archive"
+          else
+              archive="$work/mon-1stplayer-bin-$version.tar.gz"
+              base="https://github.com/victorzhuk/mon-1stplayer-linux/releases/download/$RELEASE_TAG/mon-1stplayer-x86_64-linux.tar.gz"
+              curl -fsSL --retry 3 "$base" -o "$archive"
+              actual="$(sha256sum "$archive" | awk '{print $1}')"
+              if [ "$actual" != "$EXPECTED_SHA256" ]; then
+                  echo "error: binary archive checksum mismatch" >&2
+                  exit 1
+              fi
+          fi
+
+          hash="$(sha256sum "$archive" | awk '{print $1}')"
+          sed -e "s/@VERSION@/$version/g" -e "s/@SHA256@/$hash/g" \
+              "$GITHUB_WORKSPACE/$TEMPLATE" > "$work/PKGBUILD"
+          if grep -q -e '@VERSION@' -e '@SHA256@' -e 'SKIP' "$work/PKGBUILD"; then
+              echo "error: rendered PKGBUILD still contains placeholders or SKIP" >&2
+              exit 1
+          fi
+
+          cp "$GITHUB_WORKSPACE/pkg/archlinux/LICENSE" "$work/LICENSE"
+
+          useradd -m builder
+          chown -R builder:builder "$work"
+          su builder -s /bin/bash -c "cd '$work' && makepkg --printsrcinfo > .SRCINFO"
+          if [ ! -s "$work/.SRCINFO" ]; then
+              echo "error: generated .SRCINFO is empty" >&2
+              exit 1
+          fi
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: aur-${{ matrix.pkgname }}
+          path: |
+            ${{ runner.temp }}/${{ matrix.pkgname }}/PKGBUILD
+            ${{ runner.temp }}/${{ matrix.pkgname }}/.SRCINFO
+            ${{ runner.temp }}/${{ matrix.pkgname }}/LICENSE
+          include-hidden-files: true
+          if-no-files-found: error
+
+  publish:
+    needs: prepare
+    environment: aur
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pkgname: mon-1stplayer
+          - pkgname: mon-1stplayer-bin
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    concurrency:
+      group: aur-${{ matrix.pkgname }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: aur-${{ matrix.pkgname }}
+          path: package
+      - name: Validate staged package files
+        run: |
+          set -euo pipefail
+          if [ ! -f package/PKGBUILD ] || [ ! -f package/.SRCINFO ] || [ ! -f package/LICENSE ]; then
+              echo "error: required package files missing" >&2
+              exit 1
+          fi
+          for f in package/PKGBUILD package/.SRCINFO package/LICENSE; do
+              if [ -L "$f" ]; then
+                  echo "error: $f is a symlink" >&2
+                  exit 1
+              fi
+          done
+          count="$(find package -maxdepth 1 -type f | wc -l)"
+          if [ "$count" -ne 3 ]; then
+              echo "error: expected exactly three top-level files, found $count" >&2
+              exit 1
+          fi
+          if [ -n "$(find package -type l -print -quit)" ]; then
+              echo "error: symlinks present in package" >&2
+              exit 1
+          fi
+      - name: Publish to AUR
+        env:
+          AUR_USERNAME: ${{ secrets.AUR_USERNAME }}
+          AUR_EMAIL: ${{ secrets.AUR_EMAIL }}
+          AUR_SSH_PRIVATE_KEY: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          PKGNAME: ${{ matrix.pkgname }}
+          RELEASE_TAG: ${{ inputs.release_tag }}
+        run: |
+          set -euo pipefail
+
+          key="$RUNNER_TEMP/aur_ssh_key"
+          known_hosts="$RUNNER_TEMP/aur_known_hosts"
+          cleanup() {
+              rm -f "$key" "$known_hosts"
+          }
+          trap cleanup EXIT
+
+          printf '%s\n' "$AUR_SSH_PRIVATE_KEY" > "$key"
+          chmod 0600 "$key"
+
+          printf '%s\n' 'aur.archlinux.org ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEuBKrPzbawxA/k2g6NcyV5jmqwJ2s+zpgZGZ7tpLIcN' > "$known_hosts"
+
+          export GIT_SSH_COMMAND="ssh -i \"$key\" -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=\"$known_hosts\""
+
+          clone="$RUNNER_TEMP/aur-clone"
+          rm -rf "$clone"
+          git -c init.defaultBranch=master clone "ssh://aur@aur.archlinux.org/$PKGNAME.git" "$clone"
+
+          version="${RELEASE_TAG#v}"
+          if [ -f "$clone/.SRCINFO" ]; then
+              current="$(awk '$1 == "pkgver" {print $3; exit}' "$clone/.SRCINFO")"
+              if [ -n "$current" ]; then
+                  oldest="$(printf '%s\n%s\n' "$current" "$version" | sort -V | head -n 1)"
+                  if [ "$oldest" = "$version" ] && [ "$current" != "$version" ]; then
+                      echo "AUR package $PKGNAME already at $current; release $version is superseded, skipping"
+                      exit 0
+                  fi
+              fi
+          fi
+
+          cp package/PKGBUILD package/.SRCINFO package/LICENSE "$clone/"
+          git -C "$clone" config user.name "$AUR_USERNAME"
+          git -C "$clone" config user.email "$AUR_EMAIL"
+          git -C "$clone" add -- PKGBUILD .SRCINFO LICENSE
+
+          if git -C "$clone" diff --cached --quiet; then
+              echo "AUR package $PKGNAME is already up to date for $RELEASE_TAG"
+              exit 0
+          fi
+
+          if [ -n "${current:-}" ] && [ "$current" = "$version" ]; then
+              echo "error: AUR package $PKGNAME at $version has different content; a new tag or pkgrel increment is required" >&2
+              exit 1
+          fi
+
+          git -C "$clone" commit -m "chore(release): publish $PKGNAME $RELEASE_TAG"
+          git -C "$clone" push origin HEAD:master
